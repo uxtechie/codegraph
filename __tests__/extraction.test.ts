@@ -3944,6 +3944,42 @@ describe('Nix Extraction', () => {
       const zFunc = result.nodes.find(n => n.name === 'z');
       expect(zFunc?.signature).toBe('{ name }');
     });
+
+    it('should handle curried functions and destructuring patterns', () => {
+      const code = `
+        let
+          curried = a: b: c: a + b + c;
+          destruct = { x, y } @ args: someCall x y;
+          destructPrefix = args @ { x, y }: otherCall x y;
+        in
+        {
+          f1 = curried;
+          f2 = destruct;
+          f3 = destructPrefix;
+        }
+      `;
+      const result = extractFromSource('test.nix', code);
+
+      const functions = result.nodes.filter(n => n.kind === 'function').map(n => n.name);
+      expect(functions).toContain('curried');
+      expect(functions).toContain('destruct');
+      expect(functions).toContain('destructPrefix');
+
+      const curriedFunc = result.nodes.find(n => n.name === 'curried');
+      expect(curriedFunc?.signature).toBe('a : b : c');
+
+      const destructFunc = result.nodes.find(n => n.name === 'destruct');
+      expect(destructFunc?.signature).toBe('{ x, y } @ args');
+
+      const destructPrefixFunc = result.nodes.find(n => n.name === 'destructPrefix');
+      expect(destructPrefixFunc?.signature).toBe('args @ { x, y }');
+
+      // Verify that call references inside destructured functions are correctly extracted
+      // because we traversed their bodies (last named child) rather than mistaking 'args' or '{ x, y }' as the body.
+      const calls = result.unresolvedReferences.filter(r => r.referenceKind === 'calls').map(r => r.referenceName);
+      expect(calls).toContain('someCall');
+      expect(calls).toContain('otherCall');
+    });
   });
 
   describe('Inherits', () => {

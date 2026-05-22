@@ -94,6 +94,31 @@ function isExportedNode(node: SyntaxNode): boolean {
   return insideAttrSet;
 }
 
+/** Helper to traverse nested function_expressions and collect curried parameters and the final body node */
+function getCurriedParamsAndBody(node: SyntaxNode, source: string): { params: string[]; bodyNode: SyntaxNode | null } {
+  const params: string[] = [];
+  let current = node;
+  while (current.type === 'function_expression' && current.namedChildCount > 0) {
+    const bodyNode = current.namedChild(current.namedChildCount - 1);
+    if (!bodyNode) break;
+
+    // Slice the parameter part: everything before the bodyNode
+    const paramPart = source.substring(current.startIndex, bodyNode.startIndex).trim();
+    // Remove the trailing colon
+    const paramText = paramPart.endsWith(':') ? paramPart.slice(0, -1).trim() : paramPart;
+    if (paramText) {
+      params.push(paramText);
+    }
+
+    if (bodyNode.type === 'function_expression') {
+      current = bodyNode;
+    } else {
+      return { params, bodyNode };
+    }
+  }
+  return { params, bodyNode: current.namedChildCount > 0 ? current.namedChild(current.namedChildCount - 1) : null };
+}
+
 export const nixExtractor: LanguageExtractor = {
   functionTypes: [],
   classTypes: [],
@@ -126,11 +151,19 @@ export const nixExtractor: LanguageExtractor = {
 
       if (valueNode.type === 'function_expression') {
         // It's a function definition!
-        const paramNode = valueNode.namedChild(0);
-        const bodyNode = valueNode.namedChild(1);
+        const { params, bodyNode } = getCurriedParamsAndBody(valueNode, source);
 
-        const paramText = paramNode ? getNodeText(paramNode, source).trim() : '';
-        const signature = paramText ? (paramText.startsWith('{') || paramText.startsWith('(') ? paramText : `(${paramText})`) : '()';
+        let signature = '()';
+        if (params.length > 0) {
+          if (params.length === 1) {
+            const paramText = params[0];
+            if (paramText) {
+              signature = paramText.startsWith('(') || paramText.includes('{') || paramText.includes('@') ? paramText : `(${paramText})`;
+            }
+          } else {
+            signature = params.join(' : ');
+          }
+        }
 
         const funcNode = ctx.createNode('function', name, node, { signature, isExported: isExportedNode(node) });
         if (funcNode) {
@@ -154,7 +187,7 @@ export const nixExtractor: LanguageExtractor = {
 
     // 2. Handle anonymous or top-level function_expressions (not in a binding)
     if (type === 'function_expression') {
-      const bodyNode = node.namedChild(1);
+      const bodyNode = node.namedChild(node.namedChildCount - 1);
       if (bodyNode) {
         ctx.visitNode(bodyNode);
       }
