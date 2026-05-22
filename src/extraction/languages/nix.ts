@@ -49,6 +49,51 @@ function getImportPath(argNode: SyntaxNode, source: string): string | null {
   return text;
 }
 
+/** Helper to determine if a Nix binding or inherit attribute is exported at the top-level of the file */
+function isExportedNode(node: SyntaxNode): boolean {
+  let current: SyntaxNode | null = node;
+  let insideAttrSet = false;
+
+  while (current) {
+    const parent: SyntaxNode | null = current.parent;
+    if (!parent) break;
+
+    const parentType = parent.type;
+
+    // Let bindings are local definitions, unless they are inside the let body (expression)
+    if (parentType === 'let_expression') {
+      const bodyNode = parent.childForFieldName('body') || parent.childForFieldName('expression');
+      if (!bodyNode || !bodyNode.equals(current)) {
+        return false;
+      }
+    }
+
+    // Value nested inside another binding attribute (e.g. nested attribute sets)
+    if (parentType === 'binding' && !current.equals(node)) {
+      return false;
+    }
+
+    // Function parameter lists
+    if (parentType === 'formal_parameters' || parentType === 'formals') {
+      return false;
+    }
+
+    // Attribute sets represent exported scopes if at the top level
+    if (
+      parentType === 'attrset' ||
+      parentType === 'rec_attrset' ||
+      parentType === 'attrset_expression' ||
+      parentType === 'rec_attrset_expression'
+    ) {
+      insideAttrSet = true;
+    }
+
+    current = parent;
+  }
+
+  return insideAttrSet;
+}
+
 export const nixExtractor: LanguageExtractor = {
   functionTypes: [],
   classTypes: [],
@@ -87,7 +132,7 @@ export const nixExtractor: LanguageExtractor = {
         const paramText = paramNode ? getNodeText(paramNode, source).trim() : '';
         const signature = paramText ? (paramText.startsWith('{') || paramText.startsWith('(') ? paramText : `(${paramText})`) : '()';
 
-        const funcNode = ctx.createNode('function', name, node, { signature });
+        const funcNode = ctx.createNode('function', name, node, { signature, isExported: isExportedNode(node) });
         if (funcNode) {
           ctx.pushScope(funcNode.id);
           if (bodyNode) {
@@ -100,7 +145,7 @@ export const nixExtractor: LanguageExtractor = {
         const initValue = getNodeText(valueNode, source).slice(0, 100);
         const signature = initValue ? `= ${initValue}${initValue.length >= 100 ? '...' : ''}` : undefined;
 
-        ctx.createNode('variable', name, node, { signature });
+        ctx.createNode('variable', name, node, { signature, isExported: isExportedNode(node) });
         // Still visit the value node to extract any nested calls/imports in it!
         ctx.visitNode(valueNode);
       }
@@ -125,7 +170,7 @@ export const nixExtractor: LanguageExtractor = {
           if (child) {
             const name = getNodeText(child, source).trim();
             if (name) {
-              ctx.createNode('variable', name, child);
+              ctx.createNode('variable', name, child, { isExported: isExportedNode(child) });
             }
           }
         }
