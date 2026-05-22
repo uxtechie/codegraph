@@ -22,12 +22,16 @@
 
           npmDeps = pkgs.fetchNpmDeps {
             src = ./.;
-            hash = "sha256-GJfqzykgrgD/KCtf8LupRw31S2cCmwGCF/0PMpzaCrk=";
+            hash = "sha256-zUdbsqQQKTH+Y3jtFGpQh3sIUTP+cnAv1NbJ0NNF98Q=";
           };
 
           inherit nodejs;
 
           npmBuildScript = "build";
+
+          npmInstallFlags = [ "--ignore-scripts" ];
+
+          dontNpmRebuild = true;
 
           # The build copies .wasm + schema.sql into dist/ via the
           # `copy-assets` npm script (called from `build`).  Nothing
