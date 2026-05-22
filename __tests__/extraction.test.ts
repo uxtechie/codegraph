@@ -3895,3 +3895,100 @@ local count = 0
     });
   });
 });
+
+// =============================================================================
+// Nix Extraction
+// =============================================================================
+
+describe('Nix Extraction', () => {
+  describe('Language detection', () => {
+    it('should detect Nix files', () => {
+      expect(detectLanguage('default.nix')).toBe('nix');
+      expect(detectLanguage('pkgs/development/tools/misc/codegraph/default.nix')).toBe('nix');
+    });
+
+    it('should report Nix as supported', () => {
+      expect(isLanguageSupported('nix')).toBe(true);
+      expect(getSupportedLanguages()).toContain('nix');
+    });
+  });
+
+  describe('Variables and Functions', () => {
+    it('should extract variables and functions from bindings', () => {
+      const code = `
+        let
+          x = 10;
+          y = arg: arg + 1;
+          z = { name }: "Hello " + name;
+        in
+        {
+          a = x;
+          b = y;
+        }
+      `;
+      const result = extractFromSource('test.nix', code);
+
+      const variables = result.nodes.filter(n => n.kind === 'variable').map(n => n.name);
+      const functions = result.nodes.filter(n => n.kind === 'function').map(n => n.name);
+
+      expect(variables).toContain('x');
+      expect(variables).toContain('a');
+      expect(variables).toContain('b');
+
+      expect(functions).toContain('y');
+      expect(functions).toContain('z');
+
+      const yFunc = result.nodes.find(n => n.name === 'y');
+      expect(yFunc?.signature).toBe('(arg)');
+
+      const zFunc = result.nodes.find(n => n.name === 'z');
+      expect(zFunc?.signature).toBe('{ name }');
+    });
+  });
+
+  describe('Inherits', () => {
+    it('should extract inherited attributes as variables', () => {
+      const code = `
+        let
+          inherit (pkgs) lib stdenv;
+          inherit writeShellScriptBin;
+        in
+        stdenv.mkDerivation {}
+      `;
+      const result = extractFromSource('test.nix', code);
+
+      const variables = result.nodes.filter(n => n.kind === 'variable').map(n => n.name);
+
+      expect(variables).toContain('lib');
+      expect(variables).toContain('stdenv');
+      expect(variables).toContain('writeShellScriptBin');
+    });
+  });
+
+  describe('Imports and Calls', () => {
+    it('should extract import statements and function calls', () => {
+      const code = `
+        let
+          pkgs = import <nixpkgs> {};
+          myLib = import ./lib.nix;
+          someVal = pkgs.lib.mkIf true "val";
+          curried = map (x: x + 1) [ 1 2 3 ];
+        in
+        someVal
+      `;
+      const result = extractFromSource('test.nix', code);
+
+      const imports = result.nodes.filter(n => n.kind === 'import').map(n => n.name);
+      expect(imports).toContain('<nixpkgs>');
+      expect(imports).toContain('./lib.nix');
+
+      const callRefs = result.unresolvedReferences.filter(r => r.referenceKind === 'calls').map(r => r.referenceName);
+      expect(callRefs).toContain('pkgs.lib.mkIf');
+      expect(callRefs).toContain('map');
+
+      const importRefs = result.unresolvedReferences.filter(r => r.referenceKind === 'imports').map(r => r.referenceName);
+      expect(importRefs).toContain('<nixpkgs>');
+      expect(importRefs).toContain('./lib.nix');
+    });
+  });
+});
