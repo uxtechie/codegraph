@@ -3991,4 +3991,38 @@ describe('Nix Extraction', () => {
       expect(importRefs).toContain('./lib.nix');
     });
   });
+
+  describe('Exports and Scopes', () => {
+    it('should identify top-level attributes as exported and let-bindings/nested attributes as private', () => {
+      const code = `
+        let
+          localVal = 10;
+        in
+        {
+          exportedVal = localVal;
+          exportedFunc = x: x + 1;
+          nestedAttr = {
+            privateVal = 20;
+          };
+          inherit (pkgs) exportedInherit;
+        }
+      `;
+      const result = extractFromSource('test.nix', code);
+
+      const localVal = result.nodes.find(n => n.name === 'localVal');
+      expect(localVal?.isExported).toBe(false);
+
+      const exportedVal = result.nodes.find(n => n.name === 'exportedVal');
+      expect(exportedVal?.isExported).toBe(true);
+
+      const exportedFunc = result.nodes.find(n => n.name === 'exportedFunc');
+      expect(exportedFunc?.isExported).toBe(true);
+
+      const privateVal = result.nodes.find(n => n.name === 'privateVal');
+      expect(privateVal?.isExported).toBe(false);
+
+      const exportedInherit = result.nodes.find(n => n.name === 'exportedInherit');
+      expect(exportedInherit?.isExported).toBe(true);
+    });
+  });
 });
