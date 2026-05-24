@@ -41,7 +41,10 @@
             cp -r dist $out/lib/codegraph/dist
             cp package.json $out/lib/codegraph/
 
-            # Production node_modules (already populated by buildNpmPackage)
+            # Production node_modules — prune devDependencies that the
+            # build step pulled in so the closure stays lean.
+            npm prune --omit=dev
+            find node_modules -mindepth 1 -maxdepth 1 -type d -empty -delete
             cp -r node_modules $out/lib/codegraph/node_modules
 
             # Launcher wrapper: injects --liftoff-only so tree-sitter's
@@ -59,9 +62,6 @@ EOF
 
             runHook postInstall
           '';
-
-          # No native addons to build — pure JS + WASM.
-          dontNpmBuild = false;
 
           meta = with pkgs.lib; {
             description =
