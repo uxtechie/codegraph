@@ -894,4 +894,26 @@ def bootstrap():
       expect(targetNode?.filePath).toBe('core/ports.nix');
     });
   });
+
+  describe('Directory and Module Import Resolution', () => {
+    it('does not resolve imports to directories or cause FK constraint failures', async () => {
+      const worldEngineDir = path.join(tempDir, 'world_engine');
+      const testsDir = path.join(worldEngineDir, 'example', 'ios', 'RunnerTests');
+      fs.mkdirSync(testsDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(testsDir, 'RunnerTests.swift'),
+        `import Foundation\n@testable import world_engine\n\nclass RunnerTests {\n  func testExample() {}\n}\n`
+      );
+
+      cg = await CodeGraph.init(tempDir, { index: true });
+      expect(() => cg.resolveReferences()).not.toThrow();
+
+      // Ensure no edges exist pointing to a non-existent file:world_engine node
+      const edges = cg.getOutgoingEdges(`file:${path.join('world_engine', 'example', 'ios', 'RunnerTests', 'RunnerTests.swift')}`);
+      const badEdge = edges.find((e) => e.target === 'file:world_engine');
+      expect(badEdge).toBeUndefined();
+    });
+  });
 });
+

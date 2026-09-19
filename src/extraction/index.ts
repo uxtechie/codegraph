@@ -455,7 +455,7 @@ export class ExtractionOrchestrator {
         const full = validatePathWithinRoot(rootDir, relativePath);
         if (!full) return false;
         try {
-          return fs.existsSync(full);
+          return fs.statSync(full).isFile();
         } catch {
           return false;
         }

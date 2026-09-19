@@ -227,7 +227,8 @@ export class ReferenceResolver {
         // Fall back to filesystem for files not yet indexed
         const fullPath = path.join(this.projectRoot, filePath);
         try {
-          return fs.existsSync(fullPath);
+          const stat = fs.statSync(fullPath);
+          return stat.isFile();
         } catch (error) {
           logDebug('Error checking file existence', { filePath, error: String(error) });
           return false;
@@ -463,7 +464,7 @@ export class ReferenceResolver {
       );
       if (resolvedPath) {
         const targetNodeId = `file:${resolvedPath}`;
-        if (this.context.fileExists(resolvedPath)) {
+        if (this.context.fileExists(resolvedPath) && this.queries.getNodeById(targetNodeId)) {
           return {
             original: ref,
             targetNodeId,
@@ -524,13 +525,19 @@ export class ReferenceResolver {
    * Create edges from resolved references
    */
   createEdges(resolved: ResolvedRef[]): Edge[] {
-    return resolved.map((ref) => {
+    const edges: Edge[] = [];
+    for (const ref of resolved) {
+      // Validate that target node exists in database to prevent FK constraint violations
+      const targetNode = this.queries.getNodeById(ref.targetNodeId);
+      if (!targetNode) {
+        continue;
+      }
+
       let kind = ref.original.referenceKind;
 
       // Promote "extends" to "implements" when a class/struct targets an interface
       if (kind === 'extends') {
-        const targetNode = this.queries.getNodeById(ref.targetNodeId);
-        if (targetNode && (targetNode.kind === 'interface' || targetNode.kind === 'protocol')) {
+        if (targetNode.kind === 'interface' || targetNode.kind === 'protocol') {
           const sourceNode = this.queries.getNodeById(ref.original.fromNodeId);
           if (sourceNode && sourceNode.kind !== 'interface' && sourceNode.kind !== 'protocol') {
             kind = 'implements';
@@ -544,13 +551,12 @@ export class ReferenceResolver {
       // apart from a function call without symbol info, but resolution
       // can: if `Foo` resolves to a class, the call IS an instantiation.
       if (kind === 'calls') {
-        const targetNode = this.queries.getNodeById(ref.targetNodeId);
-        if (targetNode && (targetNode.kind === 'class' || targetNode.kind === 'struct')) {
+        if (targetNode.kind === 'class' || targetNode.kind === 'struct') {
           kind = 'instantiates';
         }
       }
 
-      return {
+      edges.push({
         source: ref.original.fromNodeId,
         target: ref.targetNodeId,
         kind,
@@ -560,8 +566,9 @@ export class ReferenceResolver {
           confidence: ref.confidence,
           resolvedBy: ref.resolvedBy,
         },
-      };
-    });
+      });
+    }
+    return edges;
   }
 
   /**
